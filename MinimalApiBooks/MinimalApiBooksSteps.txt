@@ -1,0 +1,2217 @@
+iniciamos creando un proyecto asp.net empty
+
+dentro, creamos en la raiz la carpeta Entities y creamos la entidad genero con 2 propiedades, Id y Nombre
+
+dentro de Program, es bueno delimitar con comentarios un area para servicios y para middleware, en este caso estamos creando un EndPoint para devolver un listado de generos, el codigo queda de la siguiente manera:
+
+using MinimalApiBooks.Entities;
+
+var builder = WebApplication.CreateBuilder(args);
+
+//Services Area
+
+//Services Area 
+
+var app = builder.Build();
+
+//Middleware Area
+app.MapGet("/", () => "Hello World!");
+app.MapGet("/genres", () =>
+{
+	var genres = new List<Genre>
+	{
+		new Genre{Id= 1, Name= "Drama"},
+		new Genre{Id= 2, Name= "Comedy"},
+		new Genre{Id= 3, Name= "Action"}
+	};
+
+	return genres;
+});
+
+//Middleware Area
+
+app.Run();
+
+
+------------------------ Cors
+
+dentro del area de servicios vamos a habilitar los cors, que son un servicio que ya viene dentro del proyecto, solamente hay que usarlo
+
+builder.Services.AddCors(options =>
+	options.AddDefaultPolicy(configuration =>
+	{
+		configuration
+		.AllowAnyOrigin()
+		.AllowAnyMethod()
+		.AllowAnyHeader();
+	}));
+
+
+
+
+Importante, el orden de los middleware son importantes, lo que significa que si quiero poner acceder a un endpoint desde cualquier sitio, tengo que haber configurado lor cors antes del endpoint
+
+asi que antes de los app.MapGet, o cualquier otro map, poner:
+app.UseCors();
+
+
+Importante, algunos cambios, para agregar varias politicas de cors se puede hacer lo siguiente:
+
+var AllowedOrigins = builder.Configuration.GetValue<string>("allowedorigins")!;
+//Services Area
+builder.Services.AddCors(options =>
+{
+	options.AddDefaultPolicy(configuration =>
+	{
+		configuration
+		.WithOrigins(AllowedOrigins)
+		.AllowAnyMethod()
+		.AllowAnyHeader();
+	});
+
+	options.AddPolicy("free", configuration =>
+	{
+		configuration
+		.AllowAnyOrigin()
+		.AllowAnyHeader()
+		.AllowAnyMethod();
+	});
+});
+
+
+que ocurre aca? primero estoy buscando dentro del appsettings.development.json la configuracion llamada "allowedorigins" y se la estoy asignando a la variable AllowedOrigins, dentro del json lo que dice es esto:
+
+{
+  "allowedorigins": "*",
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+
+
+lo cual significa que puede acceder desde cualquier origen, para aplicar una condiguracion de cors en especifico a algun endpoint, se utiliza un atributo, de la siguiente forma:
+
+app.MapGet("/genres", [EnableCors(policyName: "free")] () => ....
+
+lo cual significa que estoy habilitando los cors que la politica tiene ese nombre, en este caso en la parte de los cors vemos que se llama free
+
+
+------------------------------ Cache
+
+el cache se utiliza para que no tengamos que volver al endpoint al momento de hacer una peticion, si no, que la respueata se manda en memoria y se le envia a la persona si necesidad de que la peticion http entre al endpoint
+
+en nuestra area de servicios en la clase program, debajo de los cors, ponermos el 
+
+builder.Services.AddOutputCache();
+
+esto ya agrega ese servicio a nuestra aplicacion, pero aun no se esta utilizando, para usarlo, en el area de los Middleware se agrega el 
+
+app.UseOutputCache();
+
+ahora tenemos que usarlo en el endpoint que queramos, se utiliza al final del endpoint agregando el siguiente codigo
+
+app.MapGet("/genres", [EnableCors(policyName: "free")] () =>
+{
+	var genres = new List<Genre>
+	{
+		new Genre{Id= 1, Name= "Drama"},
+		new Genre{Id= 2, Name= "Comedy"},
+		new Genre{Id= 3, Name= "Action"}
+	};
+
+	return genres;
+}).CacheOutput(c => c.Expire(TimeSpan.FromMinutes(1)));
+
+simplemente lo que decimos es que queremos usar el cache y que queremos que expire en el tiempo que le indiquemos, luego de pasar ese tiempo, la proxima peticion http va a entrar en el endpoint de nuevo
+
+
+
+------------------------- Swagger
+
+vamos al manage nuget packages e instalamos Swashbuckle.AspNetCore, luego vamos al area de servicios en la clase Program e insertamos los 2 servicios 
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+luego vamos a nuestra area de middleware y usamos swagger
+
+app.UseSwagger();
+app.UseSwaggerUI();
+
+esto lo hacemos antes de los cors, porque no esperamos que para poder usar swagger necesitemos cors porque es algo que usamos en nuestro origen
+
+
+------------------ Entity Framework Core
+
+en el manage nuget packages instalamos 2 paquetes:
+
+Microsoft.EntityFrameworkCore.SqlServer
+Microsoft.EntityFrameworkCore.Tools
+
+creamos en la raiz la clase ApplicationDbContext, heredamos de DbContext y generamos con ctrl + . el ctor que dice options
+
+using Microsoft.EntityFrameworkCore;
+
+namespace MinimalApiBooks
+{
+	public class ApplicationDbContext : DbContext
+	{
+		public ApplicationDbContext(DbContextOptions options) : base(options)
+		{
+		}
+	}
+}
+
+
+vamos al appsetings para crear el ConnectionString:
+
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=.;Database=MinimalApiBooks;Integrated Security=True;TrustServerCertificate=True"
+  },
+  "allowedorigins": "*",
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+
+luego en la clase program configuramos el servicio de DbContext, arriba de los cors, osea de primero
+
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+{
+	options.UseSqlServer("name=DefaultConnection");
+});
+
+
+-------------------- Entidades
+
+dentro de la clase ApplicationDbContext vamos a agregar un DbSet para que nuestra clase de genero, se cree en la base de datos
+
+dentro de la clase pero fuera del ctor, agregamos los DbSet
+
+using Microsoft.EntityFrameworkCore;
+using MinimalApiBooks.Entities;
+
+namespace MinimalApiBooks
+{
+	public class ApplicationDbContext : DbContext
+	{
+		public ApplicationDbContext(DbContextOptions options) : base(options)
+		{
+
+		}
+
+        public DbSet<Genre> Genres { get; set; }
+    }
+}
+
+luego hacemos la migracion, vamos a tools => Nuget package manager => Package Manager Console, y dentro escribimos el siguiente cmando
+
+Add-Migration Genre
+
+se crea nuetra migracion y dentro aparece lo que se hara al momento de nosotros empujar esta migracion a la base de datos, usamos el comando 
+
+Update-Database
+
+
+-------------------------- Configuraciones
+
+tenemos 3 formas de configurar dentro de ef core
+
+--Por convencion: la mas basica es por convencion, como en el caso de Id, es una propiedad que por defecto o por convencion, se pone como un primary key, y que su valor inicia en 1 y aumenta de 1 en 1
+
+--Por anotaciones de datos: Data Anotation se utiliza como etiquetas que le ponemos a nuestras propiedades para que tengan ciertas configuraciones, por ejemplo si queremos limitar el nombre de un genero y que no aparezca en la db como NVARCHAR(MAX) podemos agregar la siguiente etiqueta:
+
+using System.ComponentModel.DataAnnotations;
+
+namespace MinimalApiBooks.Entities
+{
+	public class Genre
+	{
+        public int Id { get; set; }
+        [StringLength(maximumLength: 20)]
+        public string Name { get; set; } = null!;
+    }
+}
+
+
+--Por Api Fluente: esta es la herramienta de configuracion mas poderosa de ef core, la configuracion se hace de una forma bastante descriptiva, porque primero, vamos al ApplicationDbContext, dentro de la clase pero fuera del ctor escribimos override o nos apareceran los metodos que podemos reescribir, aca iniciamos a escribir el OnModelCreating, no podemos eliminar el base.OnModelCreating, si no, que debajo de este, iniciamos las configuraciones:
+
+modelBuilder.Entity<Genre>().Property(x => x.Name).HasMaxLength(50);
+
+luego creamos la migracion y vemos los cambios, y empujamos 
+
+
+-------------------- Crear Genero
+
+lo primero que se hizo fue crear organizar todo, se crean 3 carpetas, Interfaces, Repositories, Services, se crean las interfaces IGenreRepository y IGenreService y cada una tiene la misma interface del otro
+
+namespace MinimalApiBooks.Interfaces.Genre
+{
+	public interface IGenreRepository
+	{
+		Task<List<Entities.Genre>> GetAll();
+		Task<Entities.Genre?> GetById(int id);
+		Task<int> Create(Entities.Genre genres);
+	}
+}
+
+
+namespace MinimalApiBooks.Interfaces.Genre
+{
+	public interface IGenreService
+	{
+		Task<List<Entities.Genre>> GetAll();
+		Task<Entities.Genre?> GetById(int id);
+		Task<int> Create(Entities.Genre genres);
+	}
+}
+
+luego se crea la clase GenreRepository que hereda de IGenreRepository, dicha clase implementa la interface, es la que se conecta a la base de datos, etc
+
+luego se crea la clase GenreService, esta solamente se le inyecta el IGenreRepository y le se pone de nombre genreRepository, esta inyeccion es posible porque yo configure los servicios en Program, de la siguiente manera: 
+
+builder.Services.AddScoped<IGenreRepository, GenreRepository>();
+builder.Services.AddScoped<IGenreService, GenreService>();
+
+esto lo que dice es que donde inyecte esas interfaces, mi interface se va a comportar como la clase que configure ahi
+
+por lo tant dentro de GenreService solamente llamo los metodos del genreRepository que inyecte, la clase GenreService es la que va a ser inyectada en los endpoints para llamar a los metodos del crud
+
+aqui va el GenreRepository:
+
+using Microsoft.EntityFrameworkCore;
+using MinimalApiBooks.Interfaces.Genre;
+
+namespace MinimalApiBooks.Repositories.Genre
+{
+	public class GenreRepository : IGenreRepository
+	{
+		private readonly ApplicationDbContext context;
+
+		public GenreRepository(ApplicationDbContext context)
+        {
+			this.context = context;
+		}
+
+        public async Task<int> Create(Entities.Genre genres)
+		{
+			context.Add(genres);
+			await context.SaveChangesAsync();
+			return genres.Id;
+		}
+
+		public async Task<List<Entities.Genre>> GetAll()
+		{
+			return await context.Genres.ToListAsync();
+		}
+
+		public async Task<Entities.Genre?> GetById(int id)
+		{
+			return await context.Genres.FirstOrDefaultAsync(x => x.Id == id);
+		}
+	}
+}
+
+--
+
+
+aca va el GenreService:
+
+using MinimalApiBooks.Interfaces.Genre;
+
+namespace MinimalApiBooks.Services.Genre
+{
+	public class GenreService : IGenreService
+	{
+		private readonly IGenreRepository genreRepository;
+
+		public GenreService(IGenreRepository genreRepository)
+        {
+			this.genreRepository = genreRepository;
+		}
+
+        public Task<int> Create(Entities.Genre genres)
+		{
+			return genreRepository.Create(genres);
+		}
+
+		public Task<List<Entities.Genre>> GetAll()
+		{
+			return genreRepository.GetAll();
+		}
+
+		public Task<Entities.Genre?> GetById(int id)
+		{
+			return genreRepository.GetById(id);
+		}
+	}
+}
+
+
+y aca van los endpoints:
+
+app.MapGet("/genres", [EnableCors(policyName: "free")] async (IGenreService genreService) =>
+{
+	return await genreService.GetAll();
+}).CacheOutput(c => c.Expire(TimeSpan.FromHours(1)));
+
+app.MapGet("/genres/{id:int}", [EnableCors(policyName: "free")] async (int id, IGenreService genreService) =>
+{
+	var genre = await genreService.GetById(id);
+	if(genre is null)
+	{
+		return Results.NotFound();
+	}
+
+	return Results.Ok(genre);
+}).CacheOutput(c => c.Expire(TimeSpan.FromHours(1)));
+
+app.MapPost("/genres", async (Genre genre, IGenreService genreService) =>
+{
+	var id = await genreService.Create(genre);
+	return Results.Created($"/genres/{id}", genre);
+});
+
+
+todo esta facul de entender ahi, lo que esta pasando
+
+
+
+
+
+
+---------------- explicacion del por que ese orden
+
+quiero entender el por que de ciertos archivos en un web api que estoy haciendo en asp.net, es sobre las buenas practicas, tengo 3 carpetas, Interfaces, Repositories y Services, estoy trabajando con generos, dentro de Interfaces se crean IGenreRepository y IGenreServices, sin embargo ambas interfaces son iguales, luego en la carpeta Repositories se crea GenreRepository y es donde se hace la implementecion con las bases de datos, etc, y luego en la carpeta Services, se crea GenreService y a esta clase se le inyecta el IGenreReposiory y lo llamo genreRepository que anterioemente fueron configurados en la clase Program de la siguiente manera:
+
+builder.Services.AddScoped<IGenreRepository, GenreRepository>();
+builder.Services.AddScoped<IGenreService, GenreService>();
+
+
+entonces dentro de GenreServices solamente mando a llamar los metodos del genreRepository, exactamente por que se hace eso? por que la clase de GenreService no puede simplemente heredar de IGenreRepository si esa interface es igual a IGenreService y por que se repiten las interfaces?
+
+--
+
+Lo que estás haciendo en tu estructura de carpetas y clases sigue el patrón de diseño de Inyección de Dependencias (DI) y el principio de Separación de Responsabilidades. Veamos por qué se estructura de esta manera:
+
+Interfaces (Interfaces folder):
+
+IGenreRepository e IGenreService son interfaces que definen los contratos que deben implementarse.
+Aunque ambas interfaces pueden parecer iguales, representan responsabilidades diferentes. IGenreRepository define métodos relacionados con el acceso a los datos (operaciones de base de datos, por ejemplo), mientras que IGenreService podría tener métodos relacionados con la lógica de negocio.
+Repositorios (Repositories folder):
+
+GenreRepository implementa IGenreRepository.
+Aquí es donde se realiza la implementación concreta de cómo interactuar con la base de datos o cualquier otro medio de almacenamiento de datos.
+Servicios (Services folder):
+
+GenreService implementa IGenreService.
+En lugar de hacer que GenreService herede de IGenreRepository, se sigue el principio de inyección de dependencias. De esta manera, GenreService no está directamente acoplado a una implementación concreta del repositorio. Esto facilita el cambio de la implementación del repositorio sin afectar directamente al servicio.
+Al inyectar IGenreRepository en GenreService a través de la inyección de dependencias, estás siguiendo la inversión de control (IoC). Esto facilita las pruebas unitarias y hace que tu código sea más flexible y mantenible.
+En resumen, las interfaces se repiten porque representan responsabilidades distintas. La inyección de dependencias y la separación de responsabilidades ayudan a desacoplar las diferentes capas de tu aplicación, facilitando la modificación, prueba y mantenimiento de cada componente de manera independiente.
+
+
+--------------- fin de la explicacion
+
+
+
+
+-------------- Eliminar cache al momento de agregar un genero
+
+lo primero que tenemos que hacer es agregar un tag al cache de generos: 
+
+.CacheOutput(c => c.Expire(TimeSpan.FromHours(1)).Tag("get-genres"));
+
+dicho tag llamado "get-genres" es el que usaremos
+
+dentro del post vamos a inyectar un servicio llamado IOutputCacheStore y antes del return agregamos
+await outputCacheStore.EvictByTagAsync("get-genres", default);
+
+quedaria asi:
+
+app.MapPost("/genres", async (Genre genre, IGenreService genreService, IOutputCacheStore outputCacheStore) =>
+{
+	var id = await genreService.Create(genre);
+	await outputCacheStore.EvictByTagAsync("get-genres", default);
+	return Results.Created($"/genres/{id}", genre);
+});
+
+
+
+---------------- Ordenar por nombre los registros
+
+es algo sencillo, soalmente es usar un OrderBy cuando estamos llamando los datos, eso es dentro del GenreRepository
+
+public async Task<List<Entities.Genre>> GetAll()
+{
+  return await context.Genres.OrderBy(x => x.Name).ToListAsync();
+}
+
+
+------------------- Actualizar un registro
+
+Como ya habia hecho, se agregaran los metodos en las 2 interfaces, la de repositorio y servicios, 
+
+		Task<bool> Exist(int id);
+		Task Update(Entities.Genre genre);
+
+es para ver si existe, y si existe entonces se actualiza
+
+estas son las implementaciones, dentro de GenreRepository, y luego en el GenreService se mandan a llamar
+		public Task<bool> Exist(int id)
+		{
+			return context.Genres.AnyAsync(x => x.Id == id);
+		}
+
+		public async Task Update(Entities.Genre genre)
+		{
+			context.Update(genre);
+			await context.SaveChangesAsync();
+		}
+
+este es el codigo del update, se explica solo
+
+
+app.MapPut("/genres/{id:int}", async (int id, Genre genre, IGenreService genreService, IOutputCacheStore outputCacheStore) =>
+{
+	var exist = await genreService.Exist(id);
+
+	if (!exist)
+	{
+		return Results.NotFound();
+	}
+
+	await genreService.Update(genre);
+	await outputCacheStore.EvictByTagAsync("get-genres", default);
+	return Results.NoContent();
+});
+
+
+---------------------- Eliminar un gesitstro
+
+
+Como ya habia hecho, se agregaran los metodos en las 2 interfaces, la de repositorio y servicios, 
+
+		Task Delete(int id);
+
+se crea el endpint
+
+app.MapDelete("/genres/{id:int}", async (int id, IGenreService genreService, IOutputCacheStore outputCacheStore) =>
+{
+	var exist = await genreService.Exist(id);
+
+	if (!exist)
+	{
+		return Results.NotFound();
+	}
+
+	await genreService.Delete(id);
+	await outputCacheStore.EvictByTagAsync("get-genres", default);
+	return Results.NoContent();
+});
+
+
+y se crea la implementacion en Genre Repository
+
+		public async Task Delete(int id)
+		{
+			await context.Genres.Where(x => x.Id == id).ExecuteDeleteAsync();
+		}
+
+Y se manda a llamar en GenreService
+		public async Task Delete(int id)
+		{
+			await genreRepository.Delete(id);
+		}
+
+---------------------- MapGroup
+
+para evitar poner el /genres delante de cada endpoint y tenerlos todos en un mismo punto, por si hay que hacer un cambio, se haga en una sola area, utilizamos en mapgroup, de la siguiente manera
+
+RouteGroupBuilder genreEndpoints = app.MapGroup("/genres");
+
+( se puede utilizar var, en vez de RouteGroupBuilder, pero lo puse asi para que sea una mejor practica
+
+ya luego se cambia el App.MapGet al igual que todos los Map, por genreEndpoints.MapGet, etc, ejemplos
+
+genreEndpoints.MapGet("/", [EnableCors(policyName: "free")] async (IGenreService genreService) =>
+
+
+genreEndpoints.MapGet("/{id:int}", [EnableCors(policyName: "free")] async (int id, IGenreService genreService) =>
+
+
+------------------------- Cambiar de lambda a metodos nombrados
+
+Lo unico que hay que tener el cuenta es que por ahora no puedo utilizar el [EnableCors(policyName: "free")], y que tengo que especificar exactamente lo que devuelve cada metodo, para que pueda ser bien documentado en Swagger, al igual que ahora los Results de retorno se convierten en TypedResults, aca va el codigo
+
+asi quedan los enpoins: 
+
+genreEndpoints.MapGet("/", GetAllGenres).CacheOutput(c => c.Expire(TimeSpan.FromHours(1)).Tag("get-genres"));
+genreEndpoints.MapGet("/{id:int}", GetGenreById).CacheOutput(c => c.Expire(TimeSpan.FromHours(1)).Tag("get-genres"));
+genreEndpoints.MapPost("/", PostGenre);
+genreEndpoints.MapPut("/{id:int}", UpdateGenre);
+genreEndpoints.MapDelete("/{id:int}", DeleteGenre);
+
+
+asi quedan los metodos:
+
+static async Task<Ok<List<Genre>>> GetAllGenres(IGenreService genreService)
+{
+	var genre = await genreService.GetAll();
+	return TypedResults.Ok(genre);
+}
+
+---- 
+
+static async Task<Results<Ok<Genre>, NotFound>> GetGenreById(int id, IGenreService genreService)
+{
+	var genre = await genreService.GetById(id);
+	if (genre is null)
+	{
+		return TypedResults.NotFound();
+	}
+
+	return TypedResults.Ok(genre);
+}
+
+---
+
+static async Task<Created<Genre>> PostGenre()...
+static async Task<Results<NotFound, NoContent>> UpdateGenre
+static async Task<Results<NotFound, NoContent>> DeleteGenre
+
+se usa Results para especificar que hay mas de un tipo de returno
+
+
+---------------------- Clase por cada grupo de endpoints
+
+vamos a crear una carpeta llamada GenresEndpoints, gentro vamos a crear un metodo estatico de tipo RouteGroupBuilder, eso si recordamos es el tipo de dato que nos dan los MapGroups, dentro de este metodo que llamaremos MapGenres, vamos a poner todos los maps que teniamos
+
+		public static RouteGroupBuilder MapGenres(this RouteGroupBuilder group)
+		{
+			group.MapGet("/", GetAllGenres).CacheOutput(c => c.Expire(TimeSpan.FromHours(1)).Tag("get-genres"));
+			group.MapGet("/{id:int}", GetGenreById).CacheOutput(c => c.Expire(TimeSpan.FromHours(1)).Tag("get-genres"));
+			group.MapPost("/", PostGenre);
+			group.MapPut("/{id:int}", UpdateGenre);
+			group.MapDelete("/{id:int}", DeleteGenre);
+
+			return group;
+		}
+
+
+y luego debajo de ese metodo vamos a pegar todos los metodos que ya teniamos en la program, que son lso metodos que cada endpoint de esos esta llamando, por ejemplo
+
+		static async Task<Ok<List<Genre>>> GetAllGenres(IGenreService genreService)
+		{
+			var genre = await genreService.GetAll();
+			return TypedResults.Ok(genre);
+		}
+
+etc
+
+
+---------------------- DTOs
+
+como no es bueno que nuestras entidades sean expuestas al mundo exterior, si no, que estas solo representen una tabla en la base de datos, vamos a crear los DTOs, en este caso voy a crear 2, 1 GenreRequestDTO y un GenreResponseDTO, para crear sera el Request y para mostrar el Response
+
+
+---------------------- AutoMapper
+
+instalamos el paquete AutoMapper.Extensions.Microsoft.DependencyInjection
+
+en la clase program en la parte de servicios agregamos el
+
+builder.Services.AddAutoMapper(typeof(Program));
+
+esto significa que al momento de colocar las configuraciones especificas que haremos en una clase aparte, AutoMapper sera capaz de encontrar esas configuraciones
+
+crearemos una carpeta Utilities/AutoMapper y dentro de AutoMapper vamos a crear una clase llamada AutoMapperProfiles que va a heredar de Progile de AutoMapper, dentro de esa clase pondremos el ctor y ahi dentro vamos a configurar los mapeos, para eso tenemos que saber de que clase a que clase se va a mapear
+
+por ejemplo en la parte de crear un genero, queremos llevar un mapeo de GenreRequesDTO a Genre, y de Genre a GenreResponseDTO, asi que creamos el mapa
+
+using AutoMapper;
+using MinimalApiBooks.DTOs.Genres;
+using MinimalApiBooks.Entities;
+
+namespace MinimalApiBooks.Utilities.AutoMapper
+{
+	public class AutoMapperProfiles: Profile
+	{
+        public AutoMapperProfiles()
+        {
+            CreateMap<GenreRequestDTO, Genre>();
+            CreateMap<Genre, GenreResponseDTO>();
+        }
+    }
+}
+
+ahora vamos donde creamos los generos para hacer el mapeo
+
+
+PARENTESIS:
+
+ya yo habia hecho un mapeo manual de este metodo, sin embargo para no poner esa parte en este archivo, sabiendo que era algo de pruebas y que al final vamos a usar AutoMApper, decidi saltarlo, asi que aqui voy a dejar el codigo de como estaba anteriormente sin AutoMapper y como va a quedar luego de:
+
+		static async Task<Created<GenreResponseDTO>> PostGenre(GenreRequestDTO genreRequestDTO, IGenreService genreService, IOutputCacheStore outputCacheStore)
+		{
+			var genre = new Genre
+			{
+				Name = genreRequestDTO.Name
+			};
+
+			var id = await genreService.Create(genre);
+			await outputCacheStore.EvictByTagAsync("get-genres", default);
+
+			var genreResponseDTO = new GenreResponseDTO
+			{
+				Id = id,
+				Name = genre.Name,
+			};
+
+			return TypedResults.Created($"/genres/{id}", genreResponseDTO);
+		}
+
+
+comenzamos: agregamos el IMapper mapper en los parametros del metodo, ese servicio se configura al agregar automapper al proyecto
+
+
+		static async Task<Created<GenreResponseDTO>> PostGenre(GenreRequestDTO genreRequestDTO, IGenreService genreService, IOutputCacheStore outputCacheStore, IMapper mapper)
+		{
+			var genre = mapper.Map<Genre>(genreRequestDTO);
+
+			var id = await genreService.Create(genre);
+			await outputCacheStore.EvictByTagAsync("get-genres", default);
+
+			var genreResponseDTO = mapper.Map<GenreResponseDTO>(genre);
+
+			return TypedResults.Created($"/genres/{id}", genreResponseDTO);
+		}
+
+lo unico que hay que hacer es indicar hacia que clase quiero mapear y luego pasar la variable dond estan los datos
+
+-------------------------------- Codigo de todo el GenresEndPoints completo luego de AutoMapper y todos los cambios
+
+using AutoMapper;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.OutputCaching;
+using MinimalApiBooks.DTOs.Genres;
+using MinimalApiBooks.Entities;
+using MinimalApiBooks.Interfaces.Genre;
+
+namespace MinimalApiBooks.EndPoints.Genres
+{
+	public static class GenresEndpoints
+	{     
+        public static RouteGroupBuilder MapGenres(this RouteGroupBuilder group)
+		{
+			group.MapGet("/", GetAllGenres).CacheOutput(c => c.Expire(TimeSpan.FromHours(1)).Tag("get-genres"));
+			group.MapGet("/{id:int}", GetGenreById).CacheOutput(c => c.Expire(TimeSpan.FromHours(1)).Tag("get-genres"));
+			group.MapPost("/", PostGenre);
+			group.MapPut("/{id:int}", UpdateGenre);
+			group.MapDelete("/{id:int}", DeleteGenre);
+
+			return group;
+		}
+
+		static async Task<Ok<List<GenreResponseDTO>>> GetAllGenres(IGenreService genreService, IMapper mapper)
+		{
+			var genre = await genreService.GetAll();
+			var GenreResponseDTO = mapper.Map<List<GenreResponseDTO>>(genre);
+			return TypedResults.Ok(GenreResponseDTO);
+		}
+
+		static async Task<Results<Ok<GenreResponseDTO>, NotFound>> GetGenreById(int id, IGenreService genreService, IMapper mapper)
+		{
+			var genre = await genreService.GetById(id);
+			if (genre is null)
+			{
+				return TypedResults.NotFound();
+			}
+			var GenreResponseDTO = mapper.Map<GenreResponseDTO>(genre);
+			return TypedResults.Ok(GenreResponseDTO);
+		}
+
+		static async Task<Created<GenreResponseDTO>> PostGenre(GenreRequestDTO genreRequestDTO, IGenreService genreService, IOutputCacheStore outputCacheStore, IMapper mapper)
+		{
+			var genre = mapper.Map<Genre>(genreRequestDTO);
+
+			var id = await genreService.Create(genre);
+			await outputCacheStore.EvictByTagAsync("get-genres", default);
+
+			var genreResponseDTO = mapper.Map<GenreResponseDTO>(genre);
+
+			return TypedResults.Created($"/genres/{id}", genreResponseDTO);
+		}
+
+		static async Task<Results<NotFound, NoContent>> UpdateGenre(int id, GenreRequestDTO genreRequestDTO, IGenreService genreService, IOutputCacheStore outputCacheStore, IMapper mapper)
+		{
+			var exist = await genreService.Exist(id);
+
+			if (!exist)
+			{
+				return TypedResults.NotFound();
+			}
+
+			var genre = mapper.Map<Genre>(genreRequestDTO);
+			genre.Id = id;
+
+			await genreService.Update(genre);
+			await outputCacheStore.EvictByTagAsync("get-genres", default);
+			return TypedResults.NoContent();
+		}
+
+		static async Task<Results<NotFound, NoContent>> DeleteGenre(int id, IGenreService genreService, IOutputCacheStore outputCacheStore)
+		{
+			var exist = await genreService.Exist(id);
+
+			if (!exist)
+			{
+				return TypedResults.NotFound();
+			}
+
+			await genreService.Delete(id);
+			await outputCacheStore.EvictByTagAsync("get-genres", default);
+			return TypedResults.NoContent();
+		}
+	}
+}
+
+
+-------------------------------- Author
+
+crearemos la entidad Author y vamos a poner las siguientes propiedades:
+
+namespace MinimalApiBooks.Entities
+{
+	public class Author
+	{
+        public int Id { get; set; }
+        public string Name { get; set; } = null!;
+        public DateTime BirthDate { get; set; }
+        public string? Photo { get; set; }
+    }
+}
+
+
+Luego crearemos las 2 interfaces IAuthorService y IAuthorRepository con sus respectivad clases, dentro de IAuthorRepository, vamos a crear las implementaciones, Los metodos son los mismos y las implementaciones son iguales a las pasadas, soalmente que en este caso va orientado a Authors, en vez de Genres, se puede copiar todo y cambiarlo por Author, donde sea que se requiera
+
+el unico cambio seria que en GetById, agregaremos el metodo AsNoTracking(), que sirve para que ef core no le de seguimieto a esa entidad
+
+return await context.Authors.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+
+
+luego vamos a ir a crear los DTO, AuthorRequestDTO y AuthorResponseDTO, el Response queda igual a la entidad, pero en el Request tenemos que eliminar el Id y cambiar el string? de Photo, por IFormFile, porque vamos a mandar un archivo es
+
+quedaria asi:
+
+namespace MinimalApiBooks.DTOs.Authors
+{
+	public class AuthorRequestDTO
+	{
+		public string Name { get; set; } = null!;
+		public DateTime BirthDate { get; set; }
+		public IFormFile? Photo { get; set; }
+	}
+}
+
+ahora vamos a AutoMapperProfiles y vamos a configurar los mapeos que son iguales a los anteriores, la unica diferencia es que tendremos que configurar que no se haga un mapeo de la propiedad Photo des Request a Author, porque son de tipos distintos, ya que el Request es tipo IFormFile y Author es tipo string, eso lo haremos luego manual
+
+
+          CreateMap<AuthorRequestDTO, Author>()
+              .ForMember(x => x.Photo, options => options.Ignore());
+          CreateMap<Author, AuthorResponseDTO>();
+
+
+ahora vamos a crear el AuthorEndpoints igual que la vez pasada con los Genres
+
+todo debe ser estatico, porque el metodo de RouteGroupBuilder es una extencion del metodo, por eso en el parametrso lleva this y debe ser estatico el metodo y la clase, por lo tanto, por dicho motivo es que tenemos que inyectar cada servicio en cada metodo, y no podemos solamenta trabajar los servicios en el ctor
+
+ya que es algo muy similar a genres, simplemente pegare el codigo y que se entienda leyendolo, la unica difererencia es que al MapPost tuvimos que poderle el DisableAntiforgery porque si no, no nos permite mandar archivos
+
+using AutoMapper;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using MinimalApiBooks.DTOs.Authors;
+using MinimalApiBooks.Entities;
+using MinimalApiBooks.Interfaces.Author;
+
+namespace MinimalApiBooks.EndPoints.Authors
+{
+	public static class AuthorsEndpoints
+	{
+
+		public static RouteGroupBuilder MapAuthors(this RouteGroupBuilder group)
+		{
+			group.MapPost("/", PostAuthor).DisableAntiforgery();
+			return group;
+		}
+
+		private static async Task<Created<AuthorResponseDTO>> PostAuthor([FromForm]AuthorRequestDTO authorRequestDTO, IMapper mapper, IAuthorService authorService, IOutputCacheStore outputCacheStore)
+		{
+			var author = mapper.Map<Author>(authorRequestDTO);
+			var id = await authorService.Create(author);
+			await outputCacheStore.EvictByTagAsync("author-get", default);
+			var authorResponse = mapper.Map<AuthorResponseDTO>(author);
+			return TypedResults.Created($"/authors/{id}", authorResponse);
+		}
+    }
+}
+
+
+----------------------------------- File Storage, guardar archivos
+
+se crea la interface de IFileStorage, dentro de interfaces y una carpeta llamada FileStorage, dentro de la interface se ponen los 3 metodos necesarios, Almacenar, Borrar y Actualizar, este ultimo se implementa dentro de la misma interface porque versiones recientes de .net permiten hacer eso:
+
+namespace MinimalApiBooks.Interfaces.FileStorage
+{
+	public interface IFileStorage
+	{
+		Task Delete(string? path, string container);
+		Task<string> Store(string container, IFormFile file);
+		async Task<string> Update(string path, string container, IFormFile file)
+		{
+			await Delete(path, container);
+			return await Store(container, file);
+		}
+	}
+}
+
+
+vamos para AuthorsEndpoints y ponemos el container, que es simplemente un campo del como se llamaria la carpeta, que en este caso seria authors
+
+		private static readonly string container = "authors";
+
+
+luego en la parte de PostAuthor vamos a agregar el servicio y a usarlo, vamos a mandarle la foto al fileStorage si el usuario manda una y vamos a recuperar la url que nos devuelve el metodo de almacenar, y se la asignamos al autor que estamos agregando
+
+		private static async Task<Created<AuthorResponseDTO>> PostAuthor([FromForm]AuthorRequestDTO authorRequestDTO, IMapper mapper, IAuthorService authorService, IOutputCacheStore outputCacheStore, IFileStorage fileStorage)
+		{
+			var author = mapper.Map<Author>(authorRequestDTO);
+
+			if(authorRequestDTO.Photo is not null)
+			{
+				var url = await fileStorage.Store(container, authorRequestDTO.Photo);
+				author.Photo = url;
+			}
+
+			var id = await authorService.Create(author);
+			await outputCacheStore.EvictByTagAsync("author-get", default);
+			var authorResponse = mapper.Map<AuthorResponseDTO>(author);
+			return TypedResults.Created($"/authors/{id}", authorResponse);
+		}
+
+
+
+------------------- Azure Storage
+
+vamos a portal.azure.com y vamos a crear un storage account, todo el tema esta en la clase #67 del curso de minimalApi de felipe
+
+vamos a ir al proyecto, al manage nuget packages y vamos a instalar el Azure.Storage.Blobs, luego vamos a crear una carpeta llamada Azure en Services, y dentro crearemos la clase AzureFileStorage, esa clase va a heredar de nuestro IFileStorage
+
+lo primero sera recibir el IConfiguration dentro del ctor, para poder acceder al connectionString, el cual vamos a crear dentro del appsetings.development.json (Esos datos del connectionString se encuentran dentro de azure, todo esta en la clase #67 del curso) 
+
+todo quedaria asi:
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=.;Database=MinimalApiBooks;Integrated Security=True;TrustServerCertificate=True",
+    "AzureStorage": "DefaultEndpointsProtocol=https;AccountName=minimalapibooks;AccountKey=Epn4IvG5j/kyjowOIHv6xuhMRQJLHtfPZrjgqCi7+bD0cZqlhGI91LiiHpl7W6RJZzYjpCE+Otod+AStgg7ZYg==;EndpointSuffix=core.windows.net"
+  },
+  "allowedorigins": "*",
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+
+ahora vamos a nuscar el connectionString dentro del configuration
+
+		public AzureFileStorage(IConfiguration configuration)
+        {
+			connectionString = configuration.GetConnectionString("AzureStorage")!;
+        }
+
+
+vamos a iniciar con almacenar en azure, para eso vamos a crear una coneccion a azure, 
+
+		public async Task<string> Store(string container, IFormFile file)
+		{
+			var client = new BlobContainerClient(connectionString, container);
+			await client.CreateIfNotExistsAsync();
+			client.SetAccessPolicy(PublicAccessType.Blob);
+		}
+
+ahora vamos a generar el nombre del archivo, para eso necesitamos la extension del archivo, que se consigue con el siguiente codigo:
+
+			var extension = Path.GetExtension(file.FileName);
+
+y con esta extension, vamos a genera run nuevo nombre aleatorio, para que no haya colisiones en los archivos
+
+			var fileName = $"{Guid.NewGuid()}{extension}";
+
+
+voy a pegar el codigo de almacenar de azure completo y tambien pegare una explicacion dada pro chat gpt del codigo
+
+---- chatgpt inicio explicacion
+
+public async Task<string> Store(string container, IFormFile file)
+
+Este método es público y asincrónico (async), y devuelve una tarea (Task) que se completará con una cadena (string). Toma dos parámetros: container (nombre del contenedor) y file (un archivo del tipo IFormFile).
+var client = new BlobContainerClient(connectionString, container);
+
+Crea una instancia de BlobContainerClient que representa un contenedor de blobs en Azure Storage. Se utiliza el constructor que toma una cadena de conexión (connectionString) y el nombre del contenedor (container).
+await client.CreateIfNotExistsAsync();
+
+Espera asincrónicamente a que el contenedor se cree si no existe. CreateIfNotExistsAsync es un método que verifica la existencia del contenedor y lo crea si no está presente.
+client.SetAccessPolicy(PublicAccessType.Blob);
+
+Establece la política de acceso del contenedor. En este caso, se configura para permitir acceso público a los blobs dentro del contenedor.
+var extension = Path.GetExtension(file.FileName);
+
+Obtiene la extensión del nombre del archivo utilizando el método Path.GetExtension.
+var fileName = $"{Guid.NewGuid()}{extension}";
+
+Genera un nombre de archivo único combinando un nuevo identificador único global (GUID) con la extensión del archivo.
+var blob = client.GetBlobClient(fileName);
+
+Obtiene un cliente de blob para el archivo específico dentro del contenedor.
+var blobHttpHeaders = new BlobHttpHeaders();
+
+Crea una instancia de BlobHttpHeaders que se utilizará para especificar los encabezados HTTP del blob.
+blobHttpHeaders.ContentType = file.ContentType;
+
+Establece el tipo de contenido del blob utilizando el tipo de contenido del archivo.
+await blob.UploadAsync(file.OpenReadStream(), blobHttpHeaders);
+
+Sube asincrónicamente el contenido del archivo al blob en Azure Storage. Se utiliza el flujo de lectura del archivo (file.OpenReadStream()) y se pasan los encabezados HTTP del blob.
+return blob.Uri.ToString();
+
+Devuelve la URL del blob recién creado como una cadena.
+En resumen, este código está diseñado para almacenar un archivo en Azure Storage Blob, generando un nombre único para el archivo y configurando el contenedor para permitir el acceso público a los blobs. La URL del blob recién creado se devuelve al final del método.
+
+---- chatgpt fin explicacion 
+
+
+ahora vamos a ver el codigo de Borrar, sin embargo tambien lo voy a pegar yvoy a pegar una explicacion de chatgpt
+
+        public async Task Delete(string? path, string container)
+		{
+			if (string.IsNullOrEmpty(path))
+				return;
+
+			var client = new BlobContainerClient(connectionString, container);
+			await client.CreateIfNotExistsAsync();
+			var fileName = Path.GetFileName(path);
+			var blob = client.GetBlobClient(fileName);
+			await blob.DeleteIfExistsAsync();
+		}
+
+---- chatgpt inicio explicacion 
+
+public async Task Delete(string? path, string container)
+
+Este método es público, asincrónico (async) y no devuelve ningún valor (void). Toma dos parámetros: path (ruta del blob a eliminar) y container (nombre del contenedor).
+if (string.IsNullOrEmpty(path)) return;
+
+Verifica si la ruta (path) es nula o vacía. Si es así, la función sale temprano sin realizar ninguna operación. Esto se hace para evitar intentar eliminar un blob sin una ruta válida.
+var client = new BlobContainerClient(connectionString, container);
+
+Crea una instancia de BlobContainerClient que representa un contenedor de blobs en Azure Storage. Se utiliza el constructor que toma una cadena de conexión (connectionString) y el nombre del contenedor (container).
+await client.CreateIfNotExistsAsync();
+
+Espera asincrónicamente a que el contenedor se cree si no existe. Al igual que en el código anterior, CreateIfNotExistsAsync verifica la existencia del contenedor y lo crea si no está presente.
+var fileName = Path.GetFileName(path);
+
+Obtiene el nombre de archivo del path proporcionado utilizando el método Path.GetFileName.
+var blob = client.GetBlobClient(fileName);
+
+Obtiene un cliente de blob para el archivo específico dentro del contenedor.
+await blob.DeleteIfExistsAsync();
+
+Elimina asincrónicamente el blob si existe. DeleteIfExistsAsync es un método que borra el blob solo si ya existe; de lo contrario, no hace nada.
+En resumen, este código está diseñado para eliminar un blob en Azure Storage. Verifica primero si la ruta es válida, luego obtiene el nombre del archivo a partir de la ruta, y finalmente elimina el blob correspondiente dentro del contenedor.
+
+---- chatgpt fin explicacion 
+
+
+luego vamos a program para poder configurar el servicio 
+
+builder.Services.AddScoped<IFileStorage, AzureFileStorage>();
+
+
+
+
+------------------------ LocalFileStorage, guardar archivos localmente
+
+creamos en servicios, una carpeta llamada local, dentro creamos la clase LocalFileStorage, que herede de IFileStorage, implementamos la interface y dejamos los metodos ahí, creamos el ctor e inyectamos 2 servicios, IWebHostEnviroment y IHttpContextAccessor, luego iniciamos con el metodo Store ( almacenar )
+
+primero, buscamos la extension del archivo que estamos recibiendo por medio del parametro IFormFile, para esto usamos el codigo:
+
+			var extension = Path.GetExtension(file.FileName);
+
+luego generamos un nombre aleatorio y le asignamos la extension:
+
+			var fileName = $"{Guid.NewGuid()}{extension}";
+
+
+ahora vamos a generar la carpeta donde van a almacenarse las fotos
+
+			string folder = Path.Combine(env.WebRootPath, container);
+
+que hace ese codigo? el env.WebRootPath hace referencia a una carpeta que tenemos o podemos tener en nuestro proyecto de web api, llamada wwwroot, esta carpeta sirve para servir de archivos estaticos a nuestro proyecto, ya sea imagenes o cualquier tipo de archivo, mientras que el container sabemos que es el nombre de la carpeta que nos van a mandar, para que las fotos de autores sean en la carpeta Authors
+
+ahora como el proyecto de minimalApi no trae esa carpeta, vamos a crearla, vamos al proyecto y creamos la carpeta wwwroot, debe cambiarle el icono a una especie de planeta
+
+seguimos en LocalFileStorage, vamos a validar que el directorio exista y de no existir, lo creamos
+
+			if (!Directory.Exists(folder))
+			{
+				Directory.CreateDirectory(folder);
+			}
+
+ahora vamos a crear la ruta 
+
+			string path = Path.Combine(folder, fileName);
+
+y vamos a guardar el archivo dentro de esa ruta
+
+1- Se crea una nueva instancia de la clase MemoryStream llamada ms.
+
+2- Se utiliza el método CopyToAsync para copiar el contenido del objeto file (que probablemente sea un archivo) al MemoryStream (ms).
+
+3- Se obtiene el contenido del MemoryStream en forma de un array de bytes mediante el método ToArray.
+
+4- Se utiliza el método WriteAllBytesAsync de la clase File para escribir el array de bytes en un archivo en la ubicación especificada por la variable path.
+
+En resumen, este código carga el contenido de un archivo en un MemoryStream y luego escribe ese contenido en otro archivo especificado por la variable path.
+
+			using( var ms = new MemoryStream())
+			{
+				await file.CopyToAsync(ms);
+				var content = ms.ToArray();
+				await File.WriteAllBytesAsync(path, content);
+			}
+
+ahova vamos con la Url, 
+
+
+			var url = $"{httpContextAccessor.HttpContext!.Request.Scheme}://{httpContextAccessor.HttpContext.Request.Host}";
+			var fileUrl = Path.Combine(url, container, fileName).Replace("\\", "/");
+
+			return fileUrl;
+
+explicacion:
+
+var url = $"{httpContextAccessor.HttpContext!.Request.Scheme}://{httpContextAccessor.HttpContext.Request.Host}";: Construye la parte base de la URL utilizando el esquema (http o https) y el host (dominio) del contexto HTTP actual.
+
+var fileUrl = Path.Combine(url, container, fileName).Replace("\\", "/");: Combina la URL base con el nombre del contenedor y el nombre del archivo utilizando el método Path.Combine. Luego, reemplaza cualquier barra invertida ("") con una barra inclinada ("/"). Esto asegura que la URL esté formateada correctamente, independientemente del sistema operativo.
+
+return fileUrl;: Devuelve la URL completa construida, que apunta al archivo específico en el servidor.
+
+En resumen, este código genera una URL para acceder a un archivo en función del contexto HTTP actual, el nombre del contenedor y el nombre del archivo.
+
+ahora con el metodo borrar, se explica solo:
+
+     public Task Delete(string? path, string container)
+		{
+if (string.IsNullOrEmpty(path))
+{
+	return Task.CompletedTask;
+}
+
+var fileName = Path.GetFileName(path);
+var fileDirectory = Path.Combine(env.WebRootPath, container, fileName);
+
+if (File.Exists(fileDirectory))
+{
+	File.Delete(fileDirectory);
+}
+
+return Task.CompletedTask;
+		}
+
+Todo el archivo queda asi:
+
+using MinimalApiBooks.Interfaces.FileStorage;
+
+namespace MinimalApiBooks.Services.Local
+{
+	public class LocalFileStorage : IFileStorage
+	{
+		private readonly IWebHostEnvironment env;
+		private readonly IHttpContextAccessor httpContextAccessor;
+
+		public LocalFileStorage(IWebHostEnvironment env, IHttpContextAccessor httpContextAccessor)
+        {
+			this.env = env;
+			this.httpContextAccessor = httpContextAccessor;
+		}
+		public async Task<string> Store(string container, IFormFile file)
+		{
+			var extension = Path.GetExtension(file.FileName);
+			var fileName = $"{Guid.NewGuid()}{extension}";
+			string folder = Path.Combine(env.WebRootPath, container);
+
+			if (!Directory.Exists(folder))
+			{
+				Directory.CreateDirectory(folder);
+			}
+
+			string path = Path.Combine(folder, fileName);
+			using( var ms = new MemoryStream())
+			{
+				await file.CopyToAsync(ms);
+				var content = ms.ToArray();
+				await File.WriteAllBytesAsync(path, content);
+			}
+
+			var url = $"{httpContextAccessor.HttpContext!.Request.Scheme}://{httpContextAccessor.HttpContext.Request.Host}";
+			var fileUrl = Path.Combine(url, container, fileName).Replace("\\", "/");
+
+			return fileUrl;
+		}
+
+        public Task Delete(string? path, string container)
+		{
+			if (string.IsNullOrEmpty(path))
+			{
+				return Task.CompletedTask;
+			}
+
+			var fileName = Path.GetFileName(path);
+			var fileDirectory = Path.Combine(env.WebRootPath, container, fileName);
+
+			if (File.Exists(fileDirectory))
+			{
+				File.Delete(fileDirectory);
+			}
+
+			return Task.CompletedTask;
+		}
+
+	}
+}
+
+
+luego vamos a program y cambiamos el IFileStorage para que trabaje con LocalFileStorage y agregamos el httpContextAccessor
+
+builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
+
+builder.Services.AddHttpContextAccessor();
+
+tambien vamos a agregar un Middleware
+
+app.UseStaticFiles();
+
+se agrega arriba de UseCors
+
+
+-------------------- Get de autores
+
+son muy similares a los anteriores, asi que solo voy a pegar el codigo, se entiende solo
+
+using AutoMapper;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using MinimalApiBooks.DTOs.Authors;
+using MinimalApiBooks.Entities;
+using MinimalApiBooks.Interfaces.Author;
+using MinimalApiBooks.Interfaces.FileStorage;
+
+namespace MinimalApiBooks.EndPoints.Authors
+{
+	public static class AuthorsEndpoints
+	{
+		private static readonly string container = "authors";
+
+		public static RouteGroupBuilder MapAuthors(this RouteGroupBuilder group)
+		{
+			group.MapGet("/", GetAllAuthors)
+				.CacheOutput(c => c.Expire(TimeSpan.FromHours(1))
+				.Tag("get-authors"))
+				.RequireCors("free");
+
+			group.MapGet("/{id:int}", GetAuthorById)
+				.CacheOutput(c => c.Expire(TimeSpan.FromHours(1))
+				.Tag("get-authors"))
+				.RequireCors("free");
+
+			group.MapPost("/", PostAuthor)
+				.DisableAntiforgery()
+				.RequireCors("free");
+
+			return group;
+		}
+
+		private static async Task<Ok<List<AuthorResponseDTO>>> GetAllAuthors(IAuthorService authorService, IMapper mapper)
+		{
+			var authors = await authorService.GetAll();
+			var authorsRespose = mapper.Map<List<AuthorResponseDTO>>(authors);
+			return TypedResults.Ok(authorsRespose);
+		}
+
+		private static async Task<Results<Ok<AuthorResponseDTO>, NotFound>> GetAuthorById(int id, IAuthorService authorService, IMapper mapper)
+		{
+			var author = await authorService.GetById(id);
+
+			if (author is null)
+			{
+				return TypedResults.NotFound();
+			}
+
+			var authorRespose = mapper.Map<AuthorResponseDTO>(author);
+			return TypedResults.Ok(authorRespose);
+		}
+
+		private static async Task<Created<AuthorResponseDTO>> PostAuthor([FromForm] AuthorRequestDTO authorRequestDTO, IMapper mapper, IAuthorService authorService, IOutputCacheStore outputCacheStore, IFileStorage fileStorage)
+		{
+			var author = mapper.Map<Author>(authorRequestDTO);
+
+			if (authorRequestDTO.Photo is not null)
+			{
+				var url = await fileStorage.Store(container, authorRequestDTO.Photo);
+				author.Photo = url;
+			}
+
+			var id = await authorService.Create(author);
+			await outputCacheStore.EvictByTagAsync("get-authors", default);
+			var authorResponse = mapper.Map<AuthorResponseDTO>(author);
+			return TypedResults.Created($"/authors/{id}", authorResponse);
+		}
+	}
+}
+
+
+
+
+---------- Filtros (Filtrar por nombre)
+
+vamos a AuthorRepository y creamos el metodo GetByName, el codigo lo explica solo
+
+		public async Task<List<Entities.Author>> GetByName(string name)
+		{
+			return await context.Authors.Where(a => a.Name.Contains(name)).OrderBy(a => a.Name).ToListAsync();
+		}
+
+hacemos un pull op a la interface de IAuthorRepository, luego copiamos ese metodo en IAuthorService, llamamos el metodo en AuthorService y todo listo, luego vamos a AuthorsEndpoints y creamos el metodo de obtener po rnombre, el cual es 
+
+		private static async Task<Ok<List<AuthorResponseDTO>>> GetAuthorByName(string name, IAuthorService authorService, IMapper mapper)
+		{
+			var authors = await authorService.GetByName(name);
+			var authorResponse = mapper.Map<List<AuthorResponseDTO>>(authors);
+			return TypedResults.Ok(authorResponse);
+		}
+
+es casi igual al de obtener todos, luego vamos a configurar el endpoint, que quedaria asi:
+
+			group.MapGet("getByName/{name}", GetAuthorByName)
+				.CacheOutput(c => c.Expire(TimeSpan.FromHours(1))
+				.Tag("get-authors"))
+				.RequireCors("free");
+
+
+
+--------------------- Paginacion
+
+vamos a crear un DTO llamado PaginationDTO, dentro vamos a tener la propiedad publica Page y 2 privadas, recors por pagina y maximos recors por pagina, esta ultima tendra un valor fijo de 50, para que ningun usuario, aunque quiera, no pueda ver mas de 50 registros a la vez, eso para evitar que la paginacion pierda sentido, vamos a crear una propiedad publica para recors por pagina donde vamos a retornar el valor de la propiedad privada cuando lo pida, pero para poder asignarle un valor vamos a evaluar una condicion, y es que si el valor que estan mandando es mayor que la cantidad de recors por pagina, entonces se le asigne el valor de esta, osea de 50, y si es menor, que si se le asigne el valor enviado, el codigo quedaria asi:
+
+namespace MinimalApiBooks.DTOs.Pagination
+{
+	public class PaginationDTO
+	{
+		public int Page { get; set; } = 1;
+		private int recordsPerPage = 10;
+		private readonly int maxRecordsPerPage = 50;
+
+		public int RecordsPerPage
+		{
+			get
+			{
+				return recordsPerPage;
+			}
+			set
+			{
+				recordsPerPage = (value > maxRecordsPerPage) ? maxRecordsPerPage : value;
+			}
+		}
+    }
+}
+
+ahora vamos a AuthorEndpoints y vamos a modificar el metodo de GetAllAuthors, vamos a agregar 2 parametros, int page = 1, int recordsPerPage = 10, esto el maestro indica de que es algo temporal, porque para poder utilizar la PaginationDTO, tenemos que aprender algo que aun no hemos aprendido
+
+vamos a crear una variable con una instancia de PaginationDTO y vamos a asignar a los valores de los parametros que hardcodeamos, y vamos a pagarle esa variable al metodo GetAll, por lo tanto, vamos a tener que modificar ese metodo para que pueda coger un parametro de PaginationDTO mas adelante, mientras tanto, el codigo queda asi:
+
+		private static async Task<Ok<List<AuthorResponseDTO>>> GetAllAuthors(IAuthorService authorService, IMapper mapper, int page = 1, int recordsPerPage = 10)
+		{
+			var paginationDto = new PaginationDTO { Page = page, RecordsPerPage = recordsPerPage };
+
+			var authors = await authorService.GetAll(paginationDto);
+			var authorsRespose = mapper.Map<List<AuthorResponseDTO>>(authors);
+			return TypedResults.Ok(authorsRespose);
+		}
+
+vamos a ir a AuthorRepository y ahi vamos a agregar el parametro al metodo GetAll, tenemos que hacer 2 cosas, la primera es mostrarle al cliente la cantidad de paginas que se van a generar para que este sepa que hacer con ese numero
+
+para eso vamos a utilities y creamos una carpeta de ExtensionsMethods, en esta carpeta vamos a poner una extension de HttpContext, crearemos una clase llamada httpContextExtensions y la volveremos estatica, dentro vamos a crear un metodo estatico, llamado InsertPaginationParametersInHeader<T> que en sus parametros tendra el this HttpContext httpContext, esto para indicar que es un metodo de extension, y un IQueryable<T> queryable, que esto es algo propio de ef core, que sirve para poder realiar operaciones sobre el mismo, sin conocer en que tabla se va a realizar esa operacion, esto es para poder reutilizar este metodo para mas clases, Authors, Books, Etc.
+
+		public async static Task InsertPaginationParametersInHeader<T>(this HttpContext httpContext, IQueryable<T> queryable)
+		{
+		
+		}
+
+vamos a iniciar asegurandonos de que el contexto http no sea nulo y de serlo que se lance un ArgumentNullException
+
+			if(httpContext is null) { throw new ArgumentNullException(nameof(httpContext)); }
+
+
+luego vamos a crear un double amount, que le vamos a asignar el valor de un await queryable.CountAsync(); esto lo que nos permite es saber el numero de registros que tenemos en esa tabla, la cual no sabemos cual sera, porque podemos mandar la que queramos, esto nos permite hacer un metodo reutilizable para cualquier tabla que queramos apginar sus registros sin saber cual sera
+
+			double amount = await queryable.CountAsync();
+
+ahora vamos a agregara la cabecera de la respuesta la cantidad total de registros de esa tabla:
+
+			httpContext.Response.Headers.Append("TotalNumberOfRecords", amount.ToString());
+
+
+ahora en el AuthorRepository vamos a agregar en el ctor el IHttpContextAccessor, para poder acceder al contexto http, en esta caso hay que tener en cuenta que no nos sirve el ctrl + . y create and assing field, porque eso crearia un campo de tipo httpContextAccessor y queremos uno de tipo HttpContext, por lo tanto, tenemos que hacerlo manual, aqui esta como:
+
+private readonly ApplicationDbContext context;
+private readonly HttpContext httpContext;
+
+public AuthorRepository(ApplicationDbContext context, IHttpContextAccessor httpContextAccessor)
+{
+	this.context = context;
+	httpContext = httpContextAccessor.HttpContext!;
+}
+
+ahora en el metodo GetAll de AuthorRepository vamos a obtener el queryable de autores, y a pasarlo al metodo de InsertPaginationParametersInHeader, esto nos dara la cantidad de registros en la cabecera, pero aun falta paginar
+
+			var queryable = context.Authors.AsQueryable();
+			await httpContext.InsertPaginationParametersInHeader(queryable);
+
+ahora vamos a crear otro metodo de extension, en este caso de IQueryable
+
+vamos dentro de la carpeta ExtensionsMethods y crearemos la clase llamada IQueryableExtensions, voy a pegar el codigo y lo explicare:
+
+using MinimalApiBooks.DTOs.Pagination;
+
+namespace MinimalApiBooks.Utilities.ExtensionsMethods
+{
+	public static class IQueryableExtensions
+	{
+		public static IQueryable<T> Paginate<T>(this IQueryable<T> queryable, PaginationDTO paginationDTO)
+		{
+			return queryable
+				.Skip((paginationDTO.Page - 1) * paginationDTO.RecordsPerPage)
+				.Take(paginationDTO.RecordsPerPage);
+		}
+	}
+}
+
+
+que ocurre aca? 
+
+1. hice la clase IQueryableExtensions statica
+2. hice un metodo estatico de tipo IQueryable<T>, llamado Paginate<T> con los parametros (this IQueryable<T> queryable, PaginationDTO paginationDTO). Esto lo que hace es que el metodo sea totalmente generico, y que si le paso un libro sea de tipo Paginate<Book> etc, esto es esencial para la reutilizacion de código 
+3. hice un return del queryable utilizando 2 metodos que tiene el IQueryable, primero Skip, esto lo que hace es que se esta faltando la cantidad de registros que yo indico, cuando pongo el .Skip((paginationDTO.Page - 1) * paginationDTO.RecordsPerPage) lo que indico es que se va a multiplicar el numero de pagina -1 por el numero de recors por pagina, este -1 es para que pueda haber una primera pagina, porque al iniciar en 0 hara que 0 X recordsPerPage = 0, osea que no se saltara nada, dando por hecho que recordsPerPage = 10, el codigo hara que en la pagina 1 no se salte nada porque es 0x10, en la pagina 2, que al ser -1 quedaria un 1, significa que saltara 1x10, osea que en la pagian 2 va a saltar 10 registros, por lo tanto en la segunda partq eue es el Take, va a tomar 10 y va a mostrar del 11 al 20, esto es paginar, dependiendo la pagina donde voy a estar, se va a volar los registros que haya hasta llegar a esa pagina
+
+luego vamos al metodo GetAll de AuthorRepository y cambiamos el codigo para retornar en vez de context.Authors (lo cual ya esta en el queryable), retornamos directamente el queryable y ponemos el Paginate antes del ToListAsync
+
+		public async Task<List<Entities.Author>> GetAll(PaginationDTO paginationDTO)
+		{
+			var queryable = context.Authors.AsQueryable();
+			await httpContext.InsertPaginationParametersInHeader(queryable);
+			return await queryable.OrderBy(x => x.Name).Paginate(paginationDTO).ToListAsync();
+		}
+
+
+
+------------------------------- Actualizar author
+
+vamos a ir a AuthorEndpoints y vamos a crear el metodo UpdateAuthor el cual va a recibir los mismos parametros de crear, pero agregando el int id, luego vamos a ver el como sera el codigo:
+
+		private static async Task<Results<NoContent, NotFound>> UpdateAuthor(int id, [FromForm] AuthorRequestDTO authorRequest, IAuthorService authorService, IFileStorage fileStorage, IOutputCacheStore outputCacheStore, IMapper mapper)
+		{
+			var authorDb = await authorService.GetById(id);
+
+			if(authorDb is null) { return TypedResults.NotFound(); }
+
+			var authorForUpdate = mapper.Map<Author>(authorRequest);
+			authorForUpdate.Id = id;
+			authorForUpdate.Photo = authorDb.Photo;
+
+			if(authorRequest.Photo is not null)
+			{
+				var url = await fileStorage.Update(authorForUpdate.Photo, container, authorRequest.Photo);
+
+				authorForUpdate.Photo = url;
+			}
+
+			await authorService.Update(authorForUpdate);
+			await outputCacheStore.EvictByTagAsync("get-authors", default);
+			return TypedResults.NoContent();
+		}
+
+primero, obtenemos el autor, de no haber uno con ese Id, terminamos la operacion con un NotFound,  de haber uno, creamos una variable de authorForUpdate que es la que iremos construyendo para mandar al metodo Update de authorService, al crearla le asignamos el mapeo del authorRequest, por lo tanto, ya tendremos la mayoria de cosas ahi, a exepcion del id y la foto, porque el AuthorRequestDTO no lleva id y porque al recibir un IFormFile, quitamos el mapeo para la foto, ya que el Author lo que recibe es un string, por lo tanto, au authorForUpdate le asignamos el valor de authorDb.Photo, y luego evaluamos si el usuario mando la foto y de ser asi, cambiamos el authorForUpdate.Photo, por la url que devuelve el metodo fileStorage.Update, ya al tenerlo completamente armado, vamos a mandar el authorForUpdate al authorService.Update, luego vamos a actualizar el CacheOutput y luego retornamos el TypedResults.NoContent();
+
+luego terminamos haciendo el endpoint, el cual es muy similar al de PostAuthor 
+
+			group.MapPut("/{id:int}", UpdateAuthor)
+				.DisableAntiforgery()
+				.RequireCors("free");
+
+
+
+---------------------- Eliminar author
+
+el codigo lo explica solo, es obtener el autor, para borrar su foto y luego llamar la funcion delete del authorService y ya
+
+
+		private static async Task<Results<NoContent, NotFound>> DeleteAuthor(int id,IAuthorService authorService, IFileStorage fileStorage, IOutputCacheStore outputCacheStore)
+		{
+			var author = await authorService.GetById(id);
+
+			if(author is null)
+			{
+				return TypedResults.NotFound();
+			}
+
+			await fileStorage.Delete(author.Photo, container);
+			await authorService.Delete(id);
+			await outputCacheStore.EvictByTagAsync("get-authors", default);
+			return TypedResults.NoContent();
+		}
+
+y luego hacer el endpoint 
+
+			group.MapDelete("/{id:int}", DeleteAuthor)
+				.RequireCors("free");
+
+
+----------------------- Entidad Book
+
+creamos la entidad Book 
+
+namespace MinimalApiBooks.Entities
+{
+	public class Book
+	{
+        public int Id { get; set; }
+        public string Title { get; set; } = null!;
+        public string ISBM { get; set; } = null!;
+        public DateTime PublicatitionDate { get; set; }
+        public int NumberOfPages { get; set; }
+        public string CoverImage { get; set; } = null!;
+        public string Description { get; set; } = null!;
+    }
+}
+
+
+luego ponemos lo mismo de siempre en el ApplicationDbContext, el HaxMaxLength y el IsUnicode en el OnModelCreating y luego el DbSet de Books
+
+luego creamos nuestro BookRepository, va a tener todos los mismos metodos del AuthorRepository pero para Book, y poco mas, luego vamos a crear la interface, y hacemos lo mismo con los servicios, en el BookService vamos a hacer el llamado de cada metodo, igual que siempre
+
+creamos nuestros 2 DTO, como siempre el request no lleva Id y la imagen es un IFormFile, y el Response es igual que el Book original, 
+
+luego vamos a AutoMapper e igual que el anterior vamos a ignorar el mapeo para el CoverImage, por ser de tipos distintos
+
+luego vamos a crear nuestro BooksEndpoints
+
+dentro haremos exactamente lo mismo que con autores, pero adaptado a libros, quedaria asi:
+
+using AutoMapper;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using MinimalApiBooks.DTOs.Books;
+using MinimalApiBooks.Entities;
+using MinimalApiBooks.Interfaces.Book;
+using MinimalApiBooks.Interfaces.FileStorage;
+
+namespace MinimalApiBooks.EndPoints.Books
+{
+	public static class BooksEndpoints
+	{
+		private static readonly string container = "books";
+
+		public static RouteGroupBuilder MapBooks(this RouteGroupBuilder group)
+		{
+			group.MapPost("/", PostBook)
+				.DisableAntiforgery()
+				.RequireCors("free");
+
+			return group;
+		}
+
+		private static async Task<Created<BookResponseDTO>> PostBook([FromForm] BookRequestDTO bookRequestDTO, IMapper mapper, IBookService bookService, IOutputCacheStore outputCacheStore, IFileStorage fileStorage)
+		{
+			var book = mapper.Map<Book>(bookRequestDTO);
+
+			if (bookRequestDTO.CoverImage is not null)
+			{
+				var url = await fileStorage.Store(container, bookRequestDTO.CoverImage);
+				book.CoverImage = url;
+			}
+
+			var id = await bookService.Create(book);
+			await outputCacheStore.EvictByTagAsync("get-books", default);
+			var bookResponse = mapper.Map<BookResponseDTO>(book);
+			return TypedResults.Created($"/books/{id}", bookResponse);
+		}
+	}
+}
+
+luego en Program agregamos el app.MapGroup("/books").MapBooks();
+
+
+------------------- Obtener Books
+
+los metodos son iguales que todos, bastante basicos:
+
+		private static async Task<Ok<List<BookResponseDTO>>> GetAllBooks(IBookService bookService, IMapper mapper, int page = 1, int recordsPerPage = 10)
+		{
+			var pagination = new PaginationDTO { Page = page, RecordsPerPage = recordsPerPage };
+			var books = await bookService.GetAll(pagination);
+			var booksResponse = mapper.Map<List<BookResponseDTO>>(books);
+			return TypedResults.Ok(booksResponse);
+		}
+
+		private static async Task<Results<Ok<BookResponseDTO>, NotFound>> GetBookById(int id, IBookService bookService, IMapper mapper)
+		{
+			var book = await bookService.GetById(id);
+			
+			if(book is null) { return TypedResults.NotFound(); }
+
+			var bookResponse = mapper.Map<BookResponseDTO>(book);
+			return TypedResults.Ok(bookResponse);
+		}
+
+y aca los endpoitns: 
+
+			group.MapGet("/", GetAllBooks)
+				.CacheOutput(c => c.Expire(TimeSpan.FromHours(1))
+				.Tag("get-books"))
+				.RequireCors("free");
+			
+			group.MapGet("/{id:int}", GetBookById)
+				.CacheOutput(c => c.Expire(TimeSpan.FromHours(1))
+				.Tag("get-books"))
+				.RequireCors("free");
+}
+
+
+para borrar vamos a un libro vamos a utilizar un codigo similar al de autores, donde vamos a recuperar el libro para poder obtener el link de la imagen, etc, y poder borrar tanto el registro, como la imagen
+
+		private static async Task<Results<NoContent, NotFound>> DeleteBook(int id, IBookService bookService, IOutputCacheStore outputCacheStore, IFileStorage fileStorage)
+		{
+			var bookDb = await bookService.GetById(id);
+
+			if (bookDb is null) { return TypedResults.NotFound(); }
+
+			if(bookDb.CoverImage is not null)
+			{
+				await fileStorage.Delete(bookDb.CoverImage, container);
+			}
+
+			await bookService.Delete(id);
+			await outputCacheStore.EvictByTagAsync("get-books", default);
+			return TypedResults.NoContent();
+		}
+
+luego vamos a crear el endpint
+
+			group.MapDelete("/{id:int}", DeleteBook)
+				.RequireCors("free");
+
+
+
+
+
+
+
+
+
+
+
+
+
+-------------- vamos a iniciar con las relaciones, iniciaremos creando la entidad comentario (Vamos a ponerle el = DateTime.Now directamente en la entidad, para que al crearse, automaticamente se cree con el tiempo del momento que fue posteado, tambien pondremos likes = 0, para que siempre inicie en 0 un comentario )
+
+namespace MinimalApiBooks.Entities
+{
+	public class Comment
+	{
+        public int Id { get; set; }
+        public string Title { get; set; } = null!;
+        public string Content { get; set; } = null!;
+        public DateTime CreatedDateTime { get; set; } = DateTime.Now;
+        public int Likes { get; set; } = 0;
+        public int BookId { get; set; }
+    }
+}
+
+
+aparte de las propiedades comunes, hay una llamada BookId, y luego vamos a ir a la entidad Book y vamos a agregar un listado de comentarios
+
+namespace MinimalApiBooks.Entities
+{
+	public class Book
+	{
+        public int Id { get; set; }
+        public string Title { get; set; } = null!;
+        public string ISBN { get; set; } = null!;
+        public DateTime PublicatitionDate { get; set; }
+        public int NumberOfPages { get; set; }
+        public string? CoverImage { get; set; } = null!;
+        public string Description { get; set; } = null!;
+        public List<Comment> Comments { get; set; } = new List<Comment>();
+    }
+}
+
+
+que esta pasando aca? lo que esta ocurriendo es que le estamos diciendo a entity Framework core que queremos crear una relacion uno a muchos entre Book y Comment, que a un comentario le sea asignado un libro, pero que a un libro le sea asignado un listado de comentarios 
+
+vamos crear el DbSet y las migraciones
+
+			modelBuilder.Entity<Comment>().Property(p => p.Title).HasMaxLength(250);
+
+        public DbSet<Comment> Comments { get; set; }
+
+
+
+vamos a lo rutinario, crear los repositorios e interfaces
+
+using Microsoft.EntityFrameworkCore;
+using MinimalApiBooks.Interfaces.Comment;
+
+namespace MinimalApiBooks.Repositories.Comment
+{
+	public class CommentRepository : ICommentRepository
+	{
+		private readonly ApplicationDbContext context;
+
+		public CommentRepository(ApplicationDbContext context)
+		{
+			this.context = context;
+		}
+
+		public async Task<List<Entities.Comment>> GetAll(int bookId)
+		{
+			return await context.Comments.Where(c => c.BookId == bookId).ToListAsync();
+		}
+
+		public async Task<Entities.Comment?> GetById(int id)
+		{
+			return await context.Comments.FirstOrDefaultAsync(c => c.Id == id);
+		}
+
+		public async Task<int> Create(Entities.Comment comment)
+		{
+			context.Add(comment);
+			await context.SaveChangesAsync();
+			return comment.Id;
+		}
+
+		public async Task<bool> Exist(int id)
+		{
+			return await context.Comments.AnyAsync(c => c.Id == id);
+		}
+
+		public async Task Update(Entities.Comment comment)
+		{
+			context.Update(comment);
+			await context.SaveChangesAsync();
+		}
+
+		public async Task Delete(int id)
+		{
+			await context.Comments.Where(c => c.Id == id).ExecuteDeleteAsync();
+		}
+	}
+}
+
+
+namespace MinimalApiBooks.Interfaces.Comment
+{
+	public interface ICommentRepository
+	{
+		Task<int> Create(Entities.Comment comment);
+		Task Delete(int id);
+		Task<bool> Exist(int id);
+		Task<List<Entities.Comment>> GetAll(int bookId);
+		Task<Entities.Comment?> GetById(int id);
+		Task Update(Entities.Comment comment);
+	}
+}
+
+
+
+
+
+
+
+
+using MinimalApiBooks.Interfaces.Comment;
+
+namespace MinimalApiBooks.Services.Comment
+{
+	public class CommentService : ICommentService
+	{
+		private readonly ICommentRepository commentRepository;
+
+		public CommentService(ICommentRepository commentRepository)
+        {
+			this.commentRepository = commentRepository;
+		}
+        public async Task<int> Create(Entities.Comment comment)
+		{
+			return await commentRepository.Create(comment);
+		}
+
+		public async Task Delete(int id)
+		{
+			await commentRepository.Delete(id);
+		}
+
+		public async Task<bool> Exist(int id)
+		{
+			return await commentRepository.Exist(id);
+		}
+
+		public async Task<List<Entities.Comment>> GetAll(int bookId)
+		{
+			return await commentRepository.GetAll(bookId);
+		}
+
+		public async Task<Entities.Comment?> GetById(int id)
+		{
+			return await commentRepository.GetById(id);
+		}
+
+		public async Task Update(Entities.Comment comment)
+		{
+			await commentRepository.Update(comment);
+		}
+	}
+}
+
+
+
+
+
+
+
+
+
+namespace MinimalApiBooks.Interfaces.Comment
+{
+	public interface ICommentService
+	{
+		Task<int> Create(Entities.Comment comment);
+		Task Delete(int id);
+		Task<bool> Exist(int id);
+		Task<List<Entities.Comment>> GetAll(int bookId);
+		Task<Entities.Comment?> GetById(int id);
+		Task Update(Entities.Comment comment);
+	}
+}
+
+
+
+Luego agregamos las dependencias en Program:
+
+builder.Services.AddScoped<ICommentRepository, CommentRepository>();
+builder.Services.AddScoped<ICommentService, CommentService>();
+
+
+vamos a crear los DTO de comentario:
+
+namespace MinimalApiBooks.DTOs.Comment
+{
+	public class CommentRequestDTO
+	{
+		public string Title { get; set; } = null!;
+		public string Content { get; set; } = null!;
+	}
+}
+
+
+namespace MinimalApiBooks.DTOs.Comment
+{
+	public class CommentResponseDTO
+	{
+		public int Id { get; set; }
+		public string Title { get; set; } = null!;
+		public string Content { get; set; } = null!;
+		public DateTime CreatedDateTime { get; set; }
+		public int Likes { get; set; }
+		public int BookId { get; set; }
+	}
+}
+
+
+como siempre, el comentario Response contiene todo, mientras que el comentario Request es solamente lo que necesitamos
+
+Vamos a crear los mapeos en AutoMapperProfiles
+
+            CreateMap<CommentRequestDTO, Comment>();
+            CreateMap<Comment, CommentResponseDTO>();
+
+
+vamos a crear los endpoints de comentarios (Ya sabemos, ir a endpoint, carpeta Comments, luego clase CommentEndpoints, se hace estatica, se create el RouteGroupBuilder y seguimos.) iniciamos con el de Post.
+
+using AutoMapper;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.OutputCaching;
+using MinimalApiBooks.DTOs.Comment;
+using MinimalApiBooks.Entities;
+using MinimalApiBooks.Interfaces.Book;
+using MinimalApiBooks.Interfaces.Comment;
+
+namespace MinimalApiBooks.EndPoints.Comments
+{
+	public static class CommentEndpoints
+	{
+		public static RouteGroupBuilder MapComments(this RouteGroupBuilder group)
+		{
+			group.MapPost("/", PostComment)
+				.RequireCors("free");
+
+			return group;
+		}
+
+		private static async Task<Results<Created<CommentResponseDTO>, NotFound>> PostComment(int bookId, CommentRequestDTO commentRequestDTO, ICommentService commentService, IBookService bookService, IMapper mapper, IOutputCacheStore outputCacheStore)
+		{
+			if(!await bookService.Exist(bookId))
+			{
+				return TypedResults.NotFound();
+			}
+
+			var comment = mapper.Map<Comment>(commentRequestDTO);
+			comment.BookId = bookId;
+
+			var id = await commentService.Create(comment);
+			await outputCacheStore.EvictByTagAsync("get-comments", default);
+			var commentResponse = mapper.Map<CommentResponseDTO>(comment);
+			return TypedResults.Created($"/comments/{id}", commentResponse);
+		}
+	}
+}
+
+
+lo que hacemos se entiende solo.
+
+
+luego vamos a crear los 2 metodos de Get, osea, todos los comentarios de un libro y aparte el de obtener comentario por su Id
+
+		private static async Task<Results<Ok<List<CommentResponseDTO>>, NotFound>> GetAllByBookId(int bookId, ICommentService commentService, IMapper mapper, IBookService bookService)
+		{
+			if (!await bookService.Exist(bookId))
+			{
+				return TypedResults.NotFound();
+			}
+
+			var comments = await commentService.GetAll(bookId);
+			var commentResponse = mapper.Map<List<CommentResponseDTO>>(comments);
+			return TypedResults.Ok(commentResponse);
+		}
+
+		private static async Task<Results<Ok<CommentResponseDTO>, NotFound>> GetCommentById(int bookId, int id, ICommentService commentService, IMapper mapper)
+		{
+			var comment = await commentService.GetById(id);
+
+			if(comment is null) { return TypedResults.NotFound(); }
+
+			var commentResponse = mapper.Map<CommentResponseDTO>(comment);
+			return TypedResults.Ok(commentResponse);
+		}
+
+
+voy a pegar los metodos faltantes porque son de facil entendimiento y no aportan mas de lo que sabemos:
+
+using AutoMapper;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.OutputCaching;
+using MinimalApiBooks.DTOs.Comment;
+using MinimalApiBooks.Entities;
+using MinimalApiBooks.Interfaces.Book;
+using MinimalApiBooks.Interfaces.Comment;
+
+namespace MinimalApiBooks.EndPoints.Comments
+{
+	public static class CommentEndpoints
+	{
+		public static RouteGroupBuilder MapComments(this RouteGroupBuilder group)
+		{
+			group.MapGet("/", GetAllByBookId)
+				.CacheOutput(c => c.Expire(TimeSpan.FromHours(1))
+				.Tag("get-comments")
+				.SetVaryByRouteValue(new string[] {"bookId"}))
+				.RequireCors("free");
+
+			group.MapGet("/{id:int}", GetCommentById)
+				.CacheOutput(c => c.Expire(TimeSpan.FromHours(1))
+				.Tag("get-comments"))
+				.RequireCors("free");
+
+			group.MapPost("/", PostComment)
+				.RequireCors("free");
+
+			group.MapPut("/{id:int}", UpdateComment)
+				.RequireCors("free");
+
+			group.MapDelete("/{id:int}", DeleteComment)
+				.RequireCors("free");
+
+			return group;
+		}
+
+		private static async Task<Results<Ok<List<CommentResponseDTO>>, NotFound>> GetAllByBookId(int bookId, ICommentService commentService, IMapper mapper, IBookService bookService)
+		{
+			if (!await bookService.Exist(bookId))
+			{
+				return TypedResults.NotFound();
+			}
+
+			var comments = await commentService.GetAll(bookId);
+			var commentResponse = mapper.Map<List<CommentResponseDTO>>(comments);
+			return TypedResults.Ok(commentResponse);
+		}
+
+		private static async Task<Results<Ok<CommentResponseDTO>, NotFound>> GetCommentById(int bookId, int id, ICommentService commentService, IMapper mapper)
+		{
+			var comment = await commentService.GetById(id);
+
+			if(comment is null) { return TypedResults.NotFound(); }
+
+			var commentResponse = mapper.Map<CommentResponseDTO>(comment);
+			return TypedResults.Ok(commentResponse);
+		}
+
+		private static async Task<Results<Created<CommentResponseDTO>, NotFound>> PostComment(int bookId, CommentRequestDTO commentRequestDTO, ICommentService commentService, IBookService bookService, IMapper mapper, IOutputCacheStore outputCacheStore)
+		{
+			if (!await bookService.Exist(bookId))
+			{
+				return TypedResults.NotFound();
+			}
+
+			var comment = mapper.Map<Comment>(commentRequestDTO);
+			comment.BookId = bookId;
+
+			var id = await commentService.Create(comment);
+			await outputCacheStore.EvictByTagAsync("get-comments", default);
+			var commentResponse = mapper.Map<CommentResponseDTO>(comment);
+			return TypedResults.Created($"/comments/{id}", commentResponse);
+		}
+
+		private static async Task<Results<NoContent, NotFound>> UpdateComment(int bookId, int id, CommentRequestDTO commentRequestDTO, ICommentService commentService, IBookService bookService, IOutputCacheStore outputCacheStore)
+		{
+
+			var comment = await commentService.GetById(id);
+
+			if (!await bookService.Exist(bookId) || comment is null || comment.BookId != bookId)
+			{
+				return TypedResults.NotFound();
+			}
+
+			if(commentRequestDTO.Content is not null)
+			{
+				comment.Content = commentRequestDTO.Content;
+			}
+
+			if(commentRequestDTO.Title is not null)
+			{
+				comment.Title = commentRequestDTO.Title;
+			}
+
+			await commentService.Update(comment);
+			await outputCacheStore.EvictByTagAsync("get-comments", default);
+			return TypedResults.NoContent();
+		}
+
+		private static async Task<Results<NoContent, NotFound>> DeleteComment(int bookId, int id, ICommentService commentService, IOutputCacheStore outputCacheStore)
+		{
+			var comment = await commentService.GetById(id);
+
+			if(comment is null || comment.BookId != bookId)
+			{
+				return TypedResults.NotFound();
+			}
+
+			await commentService.Delete(comment.Id);
+			await outputCacheStore.EvictByTagAsync("get-comments", default);
+			return TypedResults.NoContent();
+		}
+	}
+}
+
+
+
+Para incluir los comentarios en cada vez que pedimos un libro o el listado de libros, solo debemos agregar el .Include(c => c.comment) y listo..
+
+		public async Task<List<Entities.Book>> GetAll(PaginationDTO paginationDTO)
+		{
+			var queryable = context.Books.Include(c => c.Comments).AsQueryable();
+			await httpContext.InsertPaginationParametersInHeader(queryable);
+			return await queryable.OrderBy(x => x.Title).Paginate(paginationDTO).ToListAsync();
+		}
+
+		public async Task<Entities.Book?> GetById(int id)
+		{
+			return await context.Books.Include(c => c.Comments).AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+		}
+
+
+
+
+---------------------------- Relacion Muchos a Muchos entre generos y libros
+
+en una relacion muchos a muchos necesitamos una tabla intermedia, que dicha tabla, guardara la relacion entre las 2 entidades
+
+vamos a crear la entidad GenreBook
+
+vamos a crear 4 propiedades, los Id de la relacion que queremos y 2 propiedades de navegacion
+
+namespace MinimalApiBooks.Entities
+{
+	public class GenreBook
+	{
+        public int BookId { get; set; }
+        public int GenreId { get; set; }
+        public Genre Genre { get; set; } = null!;
+        public Book Book { get; set; } = null!;
+    }
+}
+
+estas propiedades nos sirven para que una vez tengamos el Id, si necesitamos el nombre, podemos navegar a travez de la entidad para acceder a su nombre, etc, osea, cualquier otra propiedad que necesitemos
+
+vamos a agregar tanto en Genre como en Book un listado de GenreBook
+
+		public List<GenreBook> GenresBooks { get; set; } = new List<GenreBook>();
+
+
+ahora vamos a definir una llave primaria compuesta, necesitamos que tanto BookId como GenreId sean ambas llaves primarias, asi que vamos a hacer esa configuracion mediante api Fluente
+
+vamos al OnModelCreating del ApplicationDbContext y escribimos la configuracion
+
+			modelBuilder.Entity<GenreBook>().HasKey(gb => new { gb.BookId, gb.GenreId });
+
+
+agregamos el DbSet         public DbSet<GenreBook> GenresBooks { get; set; }
+
+
+y creamos la migracion 
+
+
+------------- Editar Generos de un libro
+
+vamos a inyectar automapper en el BookRepository, luego creamos el metodo AssignGenres, que recibe el id del libro y un listado de ids de los generos
+
+verificamos si el libro existe, si no, regresamos un ArgumentException 
+
+luego vamos a crear la variable genresBooks 
+
+vamos a pegar el codigo y luego explicarlo
+
+			var genresBooks = genresIds.Select(genreId => new GenreBook() { GenreId = genreId });
+
+
+El código que proporcionaste está utilizando la función Select de LINQ para proyectar cada genreId de la lista genresIds en una nueva instancia de la clase GenreBook y está generando una secuencia de esas instancias.
+
+En detalle, la línea de código: 
+
+var genresBooks = genresIds.Select(genreId => new GenreBook() { GenreId = genreId });
+
+
+genresIds es una lista de identificadores de géneros.
+Select se utiliza para transformar cada elemento de genresIds aplicando una función a cada elemento.
+genreId => new GenreBook() { GenreId = genreId } es una expresión lambda que toma cada genreId de la lista y crea una nueva instancia de GenreBook con el GenreId establecido en el valor correspondiente de genreId.
+El resultado es una secuencia de objetos GenreBook generados a partir de los identificadores de géneros en la lista genresIds.
+
+
+en conclusion, simplemente se esta creando una isntancia de GenreBook por cada id que mandamos en el parametro de genresIds
+
+
+
+luego vamos a pegar el codigo y explicar lo que ocurre
+
+
+			book.GenresBooks = mapper.Map(genresBooks, book.GenresBooks);
+
+			await context.SaveChangesAsync();
+
+aca lo que esta pasando es que dentro del libro que recuperamos, que esta almacenado en la variable book, vamos a acceder a su listado de GenresBooks, y vamos a automapear de la variable genresBooks, que es una variable que es un IEnumerable de tipo GenreBook, que contiene todos los generos que enviamos por los parametos al metodo, vamos a automapear todos esos generos a la instancia de book.GenresBooks que tenemos, haciendo que se mantengan los que esten, se eliminen los que no esten y se agreguen los que no estaban
+
+el codigo queda:
+
+		public async Task AssignGenres(int id, List<int> genresIds)
+		{
+			var book = await context.Books.Include(b => b.GenresBooks).FirstOrDefaultAsync(b => b.Id == id);
+
+			if(book is null)
+			{
+				throw new ArgumentException($"There's not any book with the Id: {id}");
+			}
+
+			var genresBooks = genresIds.Select(genreId => new GenreBook() { GenreId = genreId });
+
+			book.GenresBooks = mapper.Map(genresBooks, book.GenresBooks);
+
+			await context.SaveChangesAsync();
+		}
+
+vamos a mandar ese metodo nuevo a las interfaces y a utilizarlo en el servicio
+
+vamos a crear un metodo que valide la existencia de todos los generos dentro de un listado de generos, utilizando su id 
+
+		public async Task<List<int>> ExistList(List<int> ids)
+		{
+			return await context.Genres.Where(g => ids.Contains(g.Id)).Select(g => g.Id).ToListAsync();
+		}
+
+
+lo pasamos a las interfaces y lo implementamos en el servicio
+
+vamos a crear el endpint de asignar generos,
+
+primero, vamos a confirmar que el libro exista, luego vamos a confirmar que el listado de generos no este vacio, y de no estarlo, vamos a verificar la existencia de todos, luego vamos a ver si la cantidad de generos que existen es diferente a la que mandaron y de ser asi, vamos a devolver un BadRequest, con los ids que noe xiste, luego vamos a asignar los generos llamando el bookService, actualizamos el cache y devolvemos NoContent
+
+		private static async Task<Results<NoContent, NotFound, BadRequest<string>>> AssignGenres(int id, List<int> genresIds, IBookService bookService, IGenreService genreService, IOutputCacheStore outputCacheStore)
+		{
+			if(!await bookService.Exist(id))
+			{
+				return TypedResults.NotFound();
+			}
+
+			var existingGenres = new List<int>();
+
+			if(genresIds.Count != 0)
+			{
+				existingGenres = await genreService.ExistList(genresIds);
+			}
+
+			if(existingGenres.Count != genresIds.Count)
+			{
+				var NotExistingGenres = genresIds.Except(existingGenres);
+				return TypedResults.BadRequest($"the genres with the id: {string.Join(", ", NotExistingGenres )} don't exist");
+			}
+
+			await bookService.AssignGenres(id, genresIds);
+			await outputCacheStore.EvictByTagAsync("get-books", default);
+			return TypedResults.NoContent();
+		}
+
+
+
+al provar veremos que en nuestra tabla de GenresBooks tendremos los registros de BookId y sus GenresId asignados
+
+-----video 90
